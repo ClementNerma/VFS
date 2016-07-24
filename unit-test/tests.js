@@ -4,11 +4,16 @@ let storage = new VFS();
 
 UnitTest.load(function(describe, it, assert) {
   describe('Test files &amp; folders', () => {
-    it('test path normalization', () => {
+    it('test tools', () => {
       assert(storage.normalize('/'), '', 'Failed to normalize the root symbol');
       assert(storage.normalize(''), '', 'Failed to normalize an empty path');
       assert(storage.normalize(), '', 'Failed to normalize an undefined path');
       assert(storage.normalize('/test//'), 'test', 'Failed to normalize a complex path');
+
+      assert(storage.into('sub'), true, 'Item not recognized as a child of root');
+      assert(storage.into('sub', 'sub'), true, 'Item not recognized as equal to itself');
+      assert(storage.into('sub/under', 'sub'), true, 'Item not recognized as a child of its parent');
+      assert(storage.into('sub', 'sub/under'), false, 'Parent recognized as a child of itself');
     });
 
     it('test existence functions', () => {
@@ -20,19 +25,24 @@ UnitTest.load(function(describe, it, assert) {
     });
 
     it('test folders writing', () => {
-      assert(storage.makedir('doc'), true, 'Failed to make folder');
-      assert(storage.makedir('doc'), false, 'Allowed to make an already existing folder');
-      assert(storage.makedir('tmp'), true, 'Failed to make folder');
-      assert(storage.makedir('.'), false, 'Allowed to remake a system folder');
+      assert(storage.makeDir('doc'), true, 'Failed to make folder');
+      assert(storage.makeDir('doc'), false, 'Allowed to make an already existing folder');
+      assert(storage.makeDir('tmp'), true, 'Failed to make folder');
+      assert(storage.makeDir('.'), false, 'Allowed to remake a system folder');
     });
 
     it('test files writing', () => {
-      assert(storage.writeFile('hello.txt', 'hello'), true, 'Failed to write file');
+      assert(storage.writeFile('hello.txt', 'hello'), true, 'Failed to write a file');
       assert(storage.writeFile('hello.txt', null), false, 'Allowed to write file with a non-string content');
+      assert(storage.writeFile('json.txt', '{"state":"good"}'), true, 'Failed to write a file');
       assert(storage.writeFile('.', 'hello'), false, 'Allowed to write folder "." as a file');
 
       assert(storage.writeFile('doc', 'hello'), false, 'Allowed to write a folder as file');
       assert(storage.writeFile('doc/test.txt', 'hello'), true, 'Failed to write a file into a sub-folder');
+      assert(storage.appendFile('doc/test.txt', 'hey'), true, 'Failed to append a file into a sub-folder');
+      assert(storage.touchFile('doc/a.txt'), true, 'Failed to create an empty file');
+
+      assert(storage.appendFile('doc/b.txt', 'hey'), true, 'Failed to append a content to a non-existant file');
     });
 
     it('test files reading', () => {
@@ -40,7 +50,26 @@ UnitTest.load(function(describe, it, assert) {
       assert(storage.readFile('.'), false, 'Allowed to read folder "." as a file');
 
       assert(storage.readFile('doc'), false, 'Allowed to read a folder as a file');
-      assert(storage.readFile('doc/test.txt'), 'hello', 'Failed to read a file into a sub-folder');
+      assert(storage.readFile('doc/test.txt'), 'hello\nhey', 'Failed to read a file into a sub-folder');
+      assert(storage.readFile('doc/b.txt'), 'hey', 'Failed to read a file into a sub-folder [may be caused by @appendFile]');
+
+      let json = storage.readJSON('json.txt');
+
+      assert(typeof json, 'object', 'Failed to read a file as JSON');
+      assert(json.state, 'good', 'JSON reading returned bad data');
+      assert(storage.readJSON('hello.txt'), false, 'Allowed to read a non-JSON file as JSON data');
+    });
+
+    it('test files copying & moving', () => {
+      assert(storage.copyFile('hello.txt', 'hey.txt'), true, 'Failed to copy a file');
+      assert(storage.copyFile('hello.txt', 'hey.txt'), false, 'Allowed to copy a file to an existing location');
+      assert(storage.readFile('hello.txt'), storage.readFile('hey.txt'), 'Source and destination file have different contents');
+
+      assert(storage.moveFile('hey.txt', '_hey.txt'), true, 'Failed to move a file');
+      assert(storage.moveFile('_hey.txt', 'hello.txt'), false, 'Allowed to move a file to an existing location');
+      assert(storage.readFile('_hey.txt'), 'hello', 'File moving written bad data');
+      assert(storage.exists('hey.txt'), false, 'Source of moved item detected as existant');
+      assert(storage.fileExists('_hey.txt'), true, 'Destination of moved item detected as inexistant');
     });
 
     it('test files removing', () => {
@@ -56,10 +85,13 @@ UnitTest.load(function(describe, it, assert) {
       assert(storage.exists('doc/test.txt'), true, 'File detected as inexistant item (into a sub-folder)');
       assert(storage.fileExists('doc/test.txt'), true, 'File detected as inexistant (into a sub-folder)');
       assert(storage.dirExists('doc/test.txt'), false, 'File detected as a folder (into a sub-folder)');
+
+      assert(storage.hasSubFolders('/'), true, 'No sub-folders detected for root');
+      assert(storage.hasSubFolders('doc'), false, 'Sub-folders detected in a folder that doesn\'t contain one');
     });
 
     it('test folders reading', () => {
-      let read = storage.readdir('doc');
+      let read = storage.readDir('doc');
 
       assert(Array.isArray(read), true, 'Failed to read a sub-folder');
       assert(read[0], 'test.txt', 'Wrong data from sub-folder reading');
@@ -68,33 +100,46 @@ UnitTest.load(function(describe, it, assert) {
 
       assert(typeof tree, 'object', 'Failed to read a sub-folder as a tree');
       assert(typeof tree['doc'], 'object', 'Wrong data from root folder tree [Folder not found]');
-      assert(tree['doc']['test.txt'], 'hello', 'Wrong data from root folder tree [Bad file]')
+      assert(tree['doc']['test.txt'], 'hello\nhey', 'Wrong data from root folder tree [Bad file]')
+    });
+
+    it('test folders import & export', () => {
+      let exp = storage.exportFolder('doc');
+
+      assert(typeof exp, 'object', 'Failed to export a folder ["doc"]');
+      assert(exp.folder['test.txt'], 'hello\nhey', 'Folder export returned bad data');
+
+      assert(storage.importFolder(exp), false, 'Allowed to import a folder to an existing location');
+      assert(storage.importFolder(exp, undefined, true), true, 'Failed to import a folder to an existing location [with "force" parameter]');
+      assert(storage.dirExists('doc'), true, 'Import failed to make the "doc" folder');
+      assert(storage.importFolder(exp, '...'), true, 'Failed to import a folder to a custom location');
+      assert(storage.dirExists('...'), true, 'Import failed to make the "..." folder');
     });
 
     it('test folders removing', () => {
-      assert(storage.removedir('tmp'), true, 'Failed to remove an empty folder');
-      assert(storage.removedir('tmp'), false, 'Allowed to remove an already-deleted folder');
-      assert(storage.removedir('inexistant'), false, 'Allowed to remove an inexistant folder');
-      assert(storage.removedir('hello.txt'), false, 'Allowed to remove a file as a folder');
-      assert(storage.removedir('doc'), false, 'Allowed to remove an non-empty folder without the "recursive" parameter');
-      assert(storage.removedir('doc', true), true, 'Failed to remove a non-empty folder ["recursive" parameter specified]');
+      assert(storage.removeTree('tmp'), true, 'Failed to remove an empty folder');
+      assert(storage.removeTree('tmp'), false, 'Allowed to remove an already-deleted folder');
+      assert(storage.removeTree('inexistant'), false, 'Allowed to remove an inexistant folder');
+      assert(storage.removeTree('hello.txt'), false, 'Allowed to remove a file as a folder');
+      assert(storage.removeTree('doc'), false, 'Allowed to remove an non-empty folder without the "recursive" parameter');
+      assert(storage.removeTree('doc', true), true, 'Failed to remove a non-empty folder ["recursive" parameter specified]');
     });
   });
 
   describe('Test advanced features', () => {
     it('test flags', () => {
-      assert(storage.makedir('tmp'), true, 'Failed to make a temp folder ["tmp"]');
-      assert(storage.makedir('doc'), true, 'Failed to make a temp folder ["doc"]');
+      assert(storage.makeDir('tmp'), true, 'Failed to make a temp folder ["tmp"]');
+      assert(storage.makeDir('doc'), true, 'Failed to make a temp folder ["doc"]');
       assert(storage.writeFile('hello.txt', 'hello'), true, 'Failed to write a temp file ["hello.txt"]');
       assert(storage.writeFile('doc/test.txt', 'hello'), true, 'Failed to write a temp file ["doc/test.txt"]');
 
       assert(storage.hasFlag('hello.txt', 'r'), false, 'Flag "r" detected but never set');
-      assert(storage.readdir('/').indexOf('hello.txt') !== -1, true, 'File not listed in directory\'s content');
+      assert(storage.readDir('/').indexOf('hello.txt') !== -1, true, 'File not listed in directory\'s content');
       assert(storage.addFlag('hello.txt', 'h'), true, 'Failed to add flag "h" to a file');
-      assert(storage.readdir('/').indexOf('hello.txt') === -1, true, '"h" flag doesn\'t work on a file');
-      assert(storage.readdir('/', true).indexOf('hello.txt') !== -1, true, 'Invisible file is not visible in directory listing even if the "showHidden" parameter is specified')
+      assert(storage.readDir('/').indexOf('hello.txt') === -1, true, '"h" flag doesn\'t work on a file');
+      assert(storage.readDir('/', true).indexOf('hello.txt') !== -1, true, 'Invisible file is not visible in directory listing even if the "showHidden" parameter is specified')
       assert(storage.removeFlag('hello.txt', 'h'), true, 'Failed to remove flag "h" to a file');
-      assert(storage.readdir('/').indexOf('hello.txt') !== -1, true, 'File not listed in directory\'s content');
+      assert(storage.readDir('/').indexOf('hello.txt') !== -1, true, 'File not listed in directory\'s content');
       assert(storage.hasFlag('hello.txt', 'h'), false, 'Flag "h" detected after removing');
       assert(storage.addFlag('hello.txt', 'r'), true, 'Failed to add flag "r" to a file');
       assert(storage.hasFlag('hello.txt', 'r'), true, 'Flag "r" not detected on a file');

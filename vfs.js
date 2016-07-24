@@ -39,6 +39,10 @@ const VFS = function(securityAgent) {
     // Normalize and get an array, permit to don't have to split the array next
     path = _normalize(path, true);
 
+    // Fail if the path is an object-reserved name
+    if(({})[path])
+      return false;
+
     // Get the full normalized path as a single string
     let joined = path.join('/');
 
@@ -53,10 +57,9 @@ const VFS = function(securityAgent) {
     }
 
     // If 'path' is the root
-    if(!path.length) {
+    if(!path.length)
       // Return true if path is the only argument, false if trying to write or delete the path (because you can't write a folder and can't delete the root)
       return ((typeof write === 'undefined' && !deleteIt) && (!type || type === 'object')) ? _storage : false;
-    }
 
     // If write is defined but that's not a string : that's a bad argument, the request fails
     if(typeof write !== 'undefined' && typeof write !== 'string' && (typeof write !== 'object' || Array.isArray(write) || !write))
@@ -213,7 +216,7 @@ const VFS = function(securityAgent) {
     * @param {string} path
     * @return {boolean} Success
     */
-  this.makedir = function(path) {
+  this.makeDir = function(path) {
     if(_agent && !agent('folder/make', path))
       return false;
 
@@ -235,12 +238,62 @@ const VFS = function(securityAgent) {
   };
 
   /**
+    * Check if a folder contains sub-folders
+    * @param {string} path
+    * @return {boolean} Success & has sub-folders
+    */
+  this.hasSubFolders = function(path) {
+    if(_agent && !agent('folder/has-sub-folders', path))
+      return false;
+
+    let read = _fs(path = _normalize(path), 'object');
+
+    // Fail if the folder can't be read (maybe it doesn't exist at all)
+    if(!read)
+      return false;
+
+    let keys = Object.keys(read);
+
+    for(let i = 0; i < keys.length; i++)
+      // If it's a sub-folder
+      if(_fs(path + '/' + keys[i], 'object'))
+        return true;
+
+    return false;
+  };
+
+  /**
+    * List content of a folder
+    * @param {string} path
+    * @param {boolean} [showHidden] Show hidden items
+    * @return {array|boolean} False if fails
+    */
+  this.readDir = function(path, showHidden) {
+    if(_agent && !agent('folder/read', path))
+      return false;
+
+    let dir = _fs(path = _normalize(path), 'object');
+
+    if(!dir)
+      return false;
+
+    let out = [], keys = Object.keys(dir), full;
+
+    for(let i = 0; i < keys.length; i++) {
+      if(showHidden || !(_table[full = path + (path.length ? '/' : '') + keys[i]] && _table[full][2].indexOf('h') !== -1))
+        out.push(keys[i]);
+    }
+
+    return out;
+  };
+
+  /**
     * Delete a folder
     * @param {string} path
     * @param {boolean} recursive Delete the folder even if it contains items
     * @return {boolean} Success
     */
-  this.removedir = function(path, recursive) {
+  this.removeTree = function(path, recursive) {
     if(_agent && !agent('folder/remove', path))
       return false;
 
@@ -281,28 +334,124 @@ const VFS = function(securityAgent) {
   };
 
   /**
-    * List content of a folder
-    * @param {string} path
-    * @param {boolean} [showHidden] Show hidden items
-    * @return {array|boolean} False if fails
+    * Import a folder
+    * @param {object} folder
+    * @param {string} [path] Import location
+    * @param {boolean} force Force importation, even if a folder already exists at this location
+    * @return {boolean} Import succeed
     */
-  this.readdir = function(path, showHidden) {
-    if(_agent && !agent('folder/read', path))
+  this.importFolder = function(folder, path, force) {
+    if(_agent && !agent('folder/import', folder, path, force))
       return false;
 
-    let dir = _fs(path = _normalize(path), 'object');
+    if(typeof folder !== 'object' || !folder || Array.isArray(folder)
+    || typeof folder.path !== 'string' || typeof folder.folder !== 'object' || !folder.folder || Array.isArray(folder)
+    || typeof folder.table !== 'object' || !folder.table || Array.isArray(folder.table))
+       return false;
 
-    if(!dir)
-      return false;
+    /**
+      * Check a folder object, recursively
+      * @param {object} obj
+      * @return {boolean} Object is valid
+      */
+    function checkRecursive(obj) {
+      let keys = Object.keys(obj);
 
-    let out = [], keys = Object.keys(dir), full;
+      for(let i = 0; i < keys.length; i++) {
+        if(typeof keys[i] === 'object') {
+          if(Array.isArray(obj[keys[i]]) || !obj[keys[i]])
+            return false;
+          else if(typeof obj[keys[i]] === 'object') {
+            if(!checkRecursive(obj[keys[i]]))
+              return false;
+          } else if(typeof obj[keys[i]] !== 'string')
+            return false;
+        }
+      }
 
-    for(let i = 0; i < keys.length; i++) {
-      if(showHidden || !(_table[full = path + (path.length ? '/' : '') + keys[i]] && _table[full][2].indexOf('h') !== -1))
-        out.push(keys[i]);
+      return true;
     }
 
-    return out;
+    // Fail if the folder's content is not valid
+    if(!checkRecursive(folder.folder))
+      return false;
+
+    let tableKeys = Object.keys(folder.table);
+
+    for(let j = 0; j < tableKeys.length; j++)
+      if(!Array.isArray(folder.table[tableKeys[j]]) || folder.table[tableKeys[j]].length !== 3)
+        return false;
+
+    path = (typeof path !== 'undefined' ? _normalize(path) : _normalize('/' + folder.path));
+
+    if(this.dirExists(path)) {
+      if(!force)
+        return false;
+      // Fail if can't remove the folder
+      else if(!this.removeTree(path, true))
+        return false;
+    } else if(this.fileExists(path)) {
+      if(!force)
+        return false;
+      // Fail if can't remove the file
+      else if(!this.removeFile(path))
+        return false;
+    }
+
+    let success = _fs(path, 'object', _clone(folder.folder));
+
+    // Fail if the folder writing failed
+    if(!success)
+      return false;
+
+    for(let j = 0; j < tableKeys.length; j++)
+      _table[path + '/' + tableKeys[j]] = [folder.table[tableKeys[j]][0], folder.table[tableKeys[j]][1], folder.table[tableKeys[j]][2]];
+
+    return true;
+  };
+
+  /**
+    * Export a folder
+    * @param {string} path
+    * @return {object|boolean}
+    */
+  this.exportFolder = function(path) {
+    if(_agent && !agent('folder/export', path))
+      return false;
+
+    let folder = _fs(path = _normalize(path), 'object');
+
+    // Fail if the folder can't be read
+    if(!folder)
+      return false;
+
+    let table = {}, keys = Object.keys(_table);
+
+    for(let i = 0; i < keys.length; i++)
+      if(keys[i].substr(0, path.length + 1) === path + '/')
+          table[keys[i].substr(path.length + 1)] = [_table[keys[i]][0], _table[keys[i]][1], _table[keys[i]][2]];
+
+    return {
+      path  : path,
+      folder: _clone(folder),
+      table : table
+    };
+  };
+
+  /**
+    * Create an empty file
+    * @param {string} path
+    * @return {boolean} Success
+    */
+  this.touchFile = function(path) {
+    if(_agent && !agent('file/make', path))
+      return false;
+
+    // Fail if the file already exists
+    if(this.fileExists(path))
+      return false;
+
+    return _fs(path, 'string', '');
   };
 
   /**
@@ -329,7 +478,7 @@ const VFS = function(securityAgent) {
     * @param {boolean} [noNewLine] If true, no new line will be added to the file (default: false)
     * @return {boolean} Success
     */
-  this.appendFile = function(path, noNewLine, content) {
+  this.appendFile = function(path, content, noNewLine) {
     if(_agent && !agent('file/append', path))
       return false;
 
@@ -359,6 +508,88 @@ const VFS = function(securityAgent) {
       return false;
 
     return _fs(path, 'string');
+  };
+
+  /**
+    * Read a file and parse as JSON
+    * @param {string} path
+    * @return {object|boolean}
+    */
+  this.readJSON = function(path) {
+    if(_agent && !agent('file/read', path))
+      return false;
+
+    let read = _fs(path, 'string');
+
+    // Fail if the file can't be read
+    if(read === false)
+      return false;
+
+    try { return JSON.parse(read); }
+    catch(e) { return false; }
+  };
+
+  /**
+    * Copy a file to another location
+    * @param {string} source
+    * @param {string} dest
+    * @return {boolean} Success
+    */
+  this.copyFile = function(source, dest) {
+    if(_agent && !agent('file/copy', source, dest))
+      return false;
+
+    // Fail if the source doesn't exist
+    if(!this.fileExists(source))
+      return false;
+
+    // Fail if the destination already exists
+    if(this.exists(dest))
+      return false;
+
+    let read = _fs(source, 'string');
+
+    // Fail if the source can't be read
+    if(read === false)
+      return false;
+
+    return _fs(dest, 'string', read);
+  };
+
+  /**
+    * Move a file to another location
+    * @param {string} source
+    * @param {string} dest
+    * @return {boolean}
+    */
+  this.moveFile = function(source, dest) {
+    if(_agent && !agent('file/move', source, dest))
+      return false;
+
+    // Fail if the source doesn't exist
+    if(!this.fileExists(source))
+      return false;
+
+    // Fail if the destination already exists
+    if(this.exists(dest))
+      return false;
+
+    // Fail if the source has the undeletable flag
+    // ..or the read-only flag and read-only set as undeletable
+    if(_table.hasOwnProperty(source = _normalize(source)) && (_table[source][2].indexOf('u') !== -1 || (_table[source][2].indexOf('r') !== -1 && _readOnlyIsUndeletable)))
+      return false;
+
+    let read = _fs(source, 'string');
+
+    // Fail if the source can't be read
+    if(read === false)
+      return false;
+
+    // Fail if the copy failed
+    if(!_fs(dest, 'string', read))
+      return false;
+
+    return this.removeFile(source);
   };
 
   /**
@@ -416,7 +647,7 @@ const VFS = function(securityAgent) {
       return false;
 
     // Fail if the item doesn't exist or if there is no table entry for this item
-    if(!_fs(path = _normalize(path)) || !_table.hasOwnProperty(path))
+    if(_fs(path = _normalize(path)) === false || !_table.hasOwnProperty(path))
       return false;
 
     // [SECURITY] The table entry array is cloned to remove all reference between the returned array and the original array
@@ -611,6 +842,16 @@ const VFS = function(securityAgent) {
     */
   this.normalize = function(path, returnArray) {
     return _normalize(path, returnArray);
+  };
+
+  /**
+    * Check if a path is into a parent
+    * @param {string} path
+    * @param {string} parent
+    * @return {boolean} Success & path is into the parent
+    */
+  this.into = function(path, parent) {
+    return _normalize(path).substr(0, (parent = _normalize(parent)).length) === parent;
   };
 
   Object.freeze(this);
