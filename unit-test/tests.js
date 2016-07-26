@@ -5,10 +5,10 @@ let storage = new VFS();
 UnitTest.load(function(describe, it, assert) {
   describe('Test files &amp; folders', () => {
     it('test tools', () => {
-      assert(storage.normalize('/'), '', 'Failed to normalize the root symbol');
-      assert(storage.normalize(''), '', 'Failed to normalize an empty path');
-      assert(storage.normalize(), '', 'Failed to normalize an undefined path');
-      assert(storage.normalize('/test//'), 'test', 'Failed to normalize a complex path');
+      assert(storage.normalize('/'), '/', 'Failed to normalize the root symbol');
+      assert(storage.normalize(''), '/', 'Failed to normalize an empty path');
+      assert(storage.normalize(), '/', 'Failed to normalize an undefined path');
+      assert(storage.normalize('/test//'), '/test', 'Failed to normalize a complex path');
 
       assert(storage.into('sub'), true, 'Item not recognized as a child of root');
       assert(storage.into('sub', 'sub'), true, 'Item not recognized as equal to itself');
@@ -41,7 +41,6 @@ UnitTest.load(function(describe, it, assert) {
       assert(storage.writeFile('doc/test.txt', 'hello'), true, 'Failed to write a file into a sub-folder');
       assert(storage.appendFile('doc/test.txt', 'hey'), true, 'Failed to append a file into a sub-folder');
       assert(storage.touchFile('doc/a.txt'), true, 'Failed to create an empty file');
-
       assert(storage.appendFile('doc/b.txt', 'hey'), true, 'Failed to append a content to a non-existant file');
     });
 
@@ -116,6 +115,16 @@ UnitTest.load(function(describe, it, assert) {
       assert(storage.dirExists('...'), true, 'Import failed to make the "..." folder');
     });
 
+    it('test cwd', () => {
+      assert(storage.chdir('.'), '/', 'Failed to set root as cwd ["."]');
+      assert(storage.chdir('..'), '/', 'Failed to set root as cwd [".."]');
+      assert(storage.chdir('doc'), '/doc', 'Failed to set "doc" as cwd');
+      assert(storage.readFile('test.txt'), 'hello\nhey', 'Failed to read a file in the cwd');
+      assert(storage.chdir('..'), '/', 'Failed to set root as cwd [".."] (2)');
+      assert(storage.chdir('/'), '/', 'Failed to set root as cwd ["/"]');
+      assert(storage.chdir(''), '/', 'Failed to set empty string as cwd [""]');
+    });
+
     it('test folders removing', () => {
       assert(storage.removeTree('tmp'), true, 'Failed to remove an empty folder');
       assert(storage.removeTree('tmp'), false, 'Allowed to remove an already-deleted folder');
@@ -187,6 +196,14 @@ UnitTest.load(function(describe, it, assert) {
       assert(storage.readFile('hello<>'), false, 'Allowed to read file with forbidden chars in strict forbid mode');
       storage.disableStrictForbid();
       assert(storage.isStrictForbid(), false, 'Strict forbid mode not detected as disabled');
+    });
+
+    it('test export & import', () => {
+      let exp = storage.export();
+
+      assert(exp.storage['_hey.txt'], 'hello', 'Export returned bad data');
+      assert(storage.import(exp), true, 'Failed to import exported data');
+      assert(storage.readFile('_hey.txt'), 'hello', 'Import corrupted storage data');
     });
   });
 

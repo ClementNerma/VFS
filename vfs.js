@@ -25,7 +25,9 @@ const VFS = function(securityAgent) {
       _readOnlyIsUndeletable = true,  // If true, when you add the 'r' flag the file is undeletable (excepted if the parent folder is deleted)
       _strictCharsForbid     = false, // If true, all request with a path containing forbidden characters will fail. If false, only 'write' requests will fail (default: false)
       _agent  = securityAgent || false, // Security agent
-      _locked = false; // If true, parameters will not be changeable again
+      _locked = false,
+      _cwd    = '/',
+      _sep    = '/'; // If true, parameters will not be changeable again
 
   /**
     * Perform an action on the filesystem
@@ -38,13 +40,15 @@ const VFS = function(securityAgent) {
   function _fs(path, type, write, deleteIt) {
     // Normalize and get an array, permit to don't have to split the array next
     path = _normalize(path, true);
+    // Remove the head separator symbol
+    path.splice(0, 1);
 
     // Fail if the path is an object-reserved name
     if(({})[path])
       return false;
 
     // Get the full normalized path as a single string
-    let joined = path.join('/');
+    let joined = _sep + path.join(_sep);
 
     // Check for forbidden characters only if the request is writing
     // ...or if the program is in 'strict' forbid
@@ -76,7 +80,7 @@ const VFS = function(securityAgent) {
       _s = _s[path[i]];
     }
 
-    // Get the last part of the path (after the last '/')
+    // Get the last part of the path (after the last _sep)
     let last = path[path.length - 1];
 
     // Fail if the item's type is not the expected type
@@ -84,9 +88,10 @@ const VFS = function(securityAgent) {
       return false;
 
     // If the request is 'exist'
-    if(typeof write === 'undefined' && !deleteIt)
+    if(typeof write === 'undefined' && !deleteIt) {
       // Check if the path exists
       return _s.hasOwnProperty(last) ? _s[last] : false;
+    }
 
     // If the request is 'write'
     if(!deleteIt) { // By elimination, this is faster than (typeof write !== 'undefined')
@@ -131,7 +136,7 @@ const VFS = function(securityAgent) {
 
     // Split the path by seperators (here, slashes)
     // The '' part permit to work even if there is no path specified, else it would cause a fatal error
-    path = (path || '').split('/');
+    path = (_cwd + _sep + (path || '')).split(_sep);
 
     for(let i = 0; i < path.length; i++) {
       if(path[i] === '..')
@@ -140,7 +145,12 @@ const VFS = function(securityAgent) {
         out.push(path[i]);
     }
 
-    return returnArray ? out : out.join('/');
+    if(!out.length)
+      out.push(_sep);
+    else if(out[0])
+      out.unshift('');
+
+    return returnArray ? out : out.join(_sep);
   }
 
   /**
@@ -163,6 +173,64 @@ const VFS = function(securityAgent) {
     }
 
     return recursive(source);
+  };
+
+  /**
+    * Clone any value
+    * @param {*} oReferance Value to clone
+    * @return {*} Cloned value
+    */
+  function _cloneAll(oReferance) {
+    var aReferances = new Array();
+    var getPrototypeOf = function(oObject) {
+      if(typeof(Object.getPrototypeOf)!=="undefined")
+        return Object.getPrototypeOf(oObject);
+
+      var oTest = new Object();
+
+      if(typeof(oObject.__proto__)!=="undefined" && typeof(oTest.__proto__)!=="undefined" && oTest.__proto__===Object.prototype)
+        return oObject.__proto__;
+
+      if(typeof(oObject.constructor)!=="undefined" && typeof(oTest.constructor)!=="undefined" && oTest.constructor===Object && typeof(oObject.constructor.prototype)!=="undefined")
+        return oObject.constructor.prototype;
+
+      return Object.prototype;
+    };
+
+    var recursiveCopy = function(oSource) {
+      if(typeof(oSource)!=="object")
+        return oSource;
+
+      if(oSource===null)
+        return null;
+
+      for(var i = 0; i < aReferances.length; i++)
+        if(aReferances[i][0]===oSource)
+          return aReferances[i][1];
+
+      if(Array.isArray(oSource)) {
+        var oCopy = [];
+        oCopy.prototype = getPrototypeOf(oSource);
+        aReferances.push([oSource, oCopy]);
+
+        for(var k in oSource)
+          oCopy[k] = recursiveCopy(oSource[k]);
+      } else {
+        var Copy = new Function();
+        Copy.prototype = getPrototypeOf(oSource);
+        var oCopy = new Copy();
+        aReferances.push([oSource,oCopy]);
+
+        for(var sPropertyName in oSource) {
+          if(oSource.hasOwnProperty(sPropertyName))
+            oCopy[sPropertyName] = recursiveCopy(oSource[sPropertyName]);
+        }
+      }
+
+      return oCopy;
+    };
+
+    return recursiveCopy(oReferance);
   };
 
   /**
@@ -256,7 +324,7 @@ const VFS = function(securityAgent) {
 
     for(let i = 0; i < keys.length; i++)
       // If it's a sub-folder
-      if(_fs(path + '/' + keys[i], 'object'))
+      if(_fs(path + _sep + keys[i], 'object'))
         return true;
 
     return false;
@@ -280,7 +348,7 @@ const VFS = function(securityAgent) {
     let out = [], keys = Object.keys(dir), full;
 
     for(let i = 0; i < keys.length; i++) {
-      if(showHidden || !(_table[full = path + (path.length ? '/' : '') + keys[i]] && _table[full][2].indexOf('h') !== -1))
+      if(showHidden || !(_table[full = path + (path !== _sep ? _sep : '') + keys[i]] && _table[full][2].indexOf('h') !== -1))
         out.push(keys[i]);
     }
 
@@ -311,10 +379,10 @@ const VFS = function(securityAgent) {
       let keys = Object.keys(obj);
 
       for(let i = 0; i < keys.length; i++) {
-        delete _table[path + '/' + keys[i]];
+        delete _table[path + _sep + keys[i]];
 
         if(typeof obj[keys[i]] === 'object')
-          recurse(obj[keys[i]], path + '/' + keys[i]);
+          recurse(obj[keys[i]], path + _sep + keys[i]);
       }
     }
 
@@ -325,9 +393,9 @@ const VFS = function(securityAgent) {
     delete _table[path];
 
     // Delete the folder from its parent
-    path = path.split('/');
+    path = path.split(_sep);
     let last = path.pop();
-    delete _fs(path.join('/'))[last];
+    delete _fs(path.join(_sep))[last];
 
     // Success !
     return true;
@@ -382,7 +450,7 @@ const VFS = function(securityAgent) {
       if(!Array.isArray(folder.table[tableKeys[j]]) || folder.table[tableKeys[j]].length !== 3)
         return false;
 
-    path = (typeof path !== 'undefined' ? _normalize(path) : _normalize('/' + folder.path));
+    path = (typeof path !== 'undefined' ? _normalize(path) : _normalize(_sep + folder.path));
 
     if(this.dirExists(path)) {
       if(!force)
@@ -405,7 +473,7 @@ const VFS = function(securityAgent) {
       return false;
 
     for(let j = 0; j < tableKeys.length; j++)
-      _table[path + '/' + tableKeys[j]] = [folder.table[tableKeys[j]][0], folder.table[tableKeys[j]][1], folder.table[tableKeys[j]][2]];
+      _table[path + _sep + tableKeys[j]] = [folder.table[tableKeys[j]][0], folder.table[tableKeys[j]][1], folder.table[tableKeys[j]][2]];
 
     return true;
   };
@@ -428,7 +496,7 @@ const VFS = function(securityAgent) {
     let table = {}, keys = Object.keys(_table);
 
     for(let i = 0; i < keys.length; i++)
-      if(keys[i].substr(0, path.length + 1) === path + '/')
+      if(keys[i].substr(0, path.length + 1) === path + _sep)
           table[keys[i].substr(path.length + 1)] = [_table[keys[i]][0], _table[keys[i]][1], _table[keys[i]][2]];
 
     return {
@@ -612,9 +680,9 @@ const VFS = function(securityAgent) {
     delete _table[path];
 
     // Delete the file from its parent
-    path = path.split('/');
+    path = path.split(_sep);
     let last = path.pop();
-    delete _fs(path.join('/'))[last];
+    delete _fs(path.join(_sep))[last];
 
     return true;
   };
@@ -751,8 +819,8 @@ const VFS = function(securityAgent) {
     if(typeof chars !== 'string' || !chars.length)
       return false;
 
-    // The '/' symbol cannot be forbidden
-    if(chars.indexOf('/') !== -1)
+    // The separator symbol cannot be forbidden
+    if(chars.indexOf(_sep) !== -1)
       return false;
 
     // Add one char by one char to see duplicates
@@ -832,6 +900,94 @@ const VFS = function(securityAgent) {
     */
   this.isAgent = function() {
     return (_agent ? _agent('agent/exist') !== false : false);
+  };
+
+  /**
+    * Get or change the current working directory (CWD)
+    * @param {string} [path] If specified, change the CWD
+    * @return {string} CWD
+    */
+  this.chdir = function(path) {
+    if(_agent && !agent('folder/cwd', path))
+      return false;
+
+    if(typeof path === 'string') {
+      // Fail if the folder doesn't exist
+      if(!this.dirExists(path = _normalize(path)))
+        return false;
+
+      _cwd = path;
+    }
+
+    return _cwd;
+  };
+
+  /**
+    * Get or change the server's separator symbol
+    * @param {string} [char]
+    * @return {string} Separator
+    */
+  this.separator = function(char) {
+    if(_agent && !agent('folder/separator', char))
+      return false;
+
+    if(typeof char !== 'undefined') {
+      // Fail if the string is not a single symbol
+      if(typeof char !== 'string' || char.length !== 1 || _forbiddenChars.indexOf(char) !== -1)
+        return false;
+
+      _sep = char;
+    }
+
+    return _sep;
+  };
+
+  /**
+    * Export the entire storage
+    * @return {object}
+    */
+  this.export = function() {
+    if(_agent && !agent('*/export'))
+      return false;
+
+    return {
+      storage: _clone(_storage),
+      table  : _cloneAll(_table),
+      sep    : _sep,
+      cwd    : _cwd,
+      locked : _locked,
+      agent  : _agent,
+
+      strictCharsForbid    : _strictCharsForbid,
+      forbiddenChars       : _forbiddenChars,
+      readOnlyIsUndeletable: _readOnlyIsUndeletable
+    };
+  };
+
+  /**
+    * Import the entire storage
+    * @param {object} storage
+    * @return {boolean} Success
+    */
+  this.import = function(storage) {
+    if(typeof storage.storage !== 'object' || typeof storage.table !== 'object' || typeof storage.sep !== 'string' ||
+       typeof storage.cwd !== 'string' && typeof storage.locked !== 'boolean' && typeof storage.agent === 'undefined' ||
+       typeof storage.strictCharsForbid !== 'string' && typeof storage.forbiddenChars !== 'string' ||
+       typeof storage.readOnlyIsUndeletable !== 'boolean')
+      return false;
+
+    _storage = _clone(storage.storage);
+    _table   = _cloneAll(storage.table);
+    _sep     = storage.sep;
+    _cwd     = storage.cwd;
+    _locked  = storage.locked;
+    _agent   = storage.agent;
+
+    _strictCharsForbid     = storage.strictCharsForbid;
+    _forbiddenChars        = storage.forbiddenChars;
+    _readOnlyIsUndeletable = storage.readOnlyIsUndeletable;
+
+    return true;
   };
 
   /**
