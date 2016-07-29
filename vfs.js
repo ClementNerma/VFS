@@ -165,7 +165,7 @@ const VFS = function(securityAgent) {
     function recursive(source) {
       let out = {};
 
-      for(let key of Object.keys(source))
+      for(let key of Reflect.ownKeys(source))
         out[key] = (typeof source[key] === 'object' ? recursive(source[key]) : source[key]);
         /**if(typeof sub[keys[i]] === 'object')
           out[keys[i]] = recursive(source[keys[i]]);
@@ -323,7 +323,7 @@ const VFS = function(securityAgent) {
     if(!read)
       return false;
 
-    for(let item of Object.keys(read))
+    for(let item of Reflect.ownKeys(read))
       // If it's a sub-folder
       if(_fs(path + _sep + item, 'object'))
         return true;
@@ -348,7 +348,7 @@ const VFS = function(securityAgent) {
 
     let out = [], full;
 
-    for(let key of Object.keys(dir)) {
+    for(let key of Reflect.ownKeys(dir)) {
       if(showHidden || !(_table[full = path + (path !== _sep ? _sep : '') + key] && _table[full][2].includes('h')))
         out.push(key);
     }
@@ -373,11 +373,11 @@ const VFS = function(securityAgent) {
       return false;
 
     // Fail if the folder isn't empty and the removing is not set as 'recursive'
-    if(Object.keys(dir).length && !recursive)
+    if(Reflect.ownKeys(dir).length && !recursive)
       return false;
 
     function recurse(obj, path) {
-      for(let key of Object.keys(obj)) {
+      for(let key of Reflect.ownKeys(obj)) {
         delete _table[path + _sep + key];
 
         if(typeof obj[key] === 'object')
@@ -386,7 +386,7 @@ const VFS = function(securityAgent) {
     }
 
     // If the folder contains items, delete all the entries in the table associated to those items
-    if(Object.keys(dir).length)
+    if(Reflect.ownKeys(dir).length)
       recurse(dir, path);
 
     delete _table[path];
@@ -422,7 +422,7 @@ const VFS = function(securityAgent) {
       * @return {boolean} Object is valid
       */
     function checkRecursive(obj) {
-      for(let key of Object.keys(obj)) {
+      for(let key of Reflect.ownKeys(obj)) {
         if(typeof key === 'object') {
           if(Array.isArray(obj[key]) || !obj[key])
             return false;
@@ -441,7 +441,7 @@ const VFS = function(securityAgent) {
     if(!checkRecursive(folder.folder))
       return false;
 
-    let tableKeys = Object.keys(folder.table);
+    let tableKeys = Reflect.ownKeys(folder.table);
 
     for(let tableKey of tableKeys)
       if(!Array.isArray(folder.table[tableKey]) || folder.table[tableKey].length !== 3)
@@ -492,7 +492,7 @@ const VFS = function(securityAgent) {
 
     let table = {};
 
-    for(let key of Object.keys(_table))
+    for(let key of Reflect.ownKeys(_table))
       if(key.substr(0, path.length + 1) === path + _sep)
           table[key.substr(path.length + 1)] = [_table[key][0], _table[key][1], _table[key][2]];
 

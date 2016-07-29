@@ -1,4 +1,8 @@
 Fr 29-07-2016
+Version 1.3-a
+- Fixed a bug : `Object.keys()` was used on objects, which will returns some non-own properties
+
+Fr 29-07-2016
 Version 1.3
 - Adapted to ES6 syntax [Improved performance a little]
 - Fixed a bug with CWD during absolute path normalization
