@@ -1,3 +1,10 @@
+Fr 29-07-2016
+Version 1.3
+- Adapted to ES6 syntax [Improved performance a little]
+- Fixed a bug with CWD during absolute path normalization
+- Fixed a bug with absolute path normalization (using the default separator instead of the current)
+- Fixed a bug with @import which was not doing a right validation
+
 Tu 26-07-2016
 Version 1.2
 - Added support for CWD and @chdir
