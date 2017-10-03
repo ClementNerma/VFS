@@ -74,4 +74,4 @@ storage.getTree('documents');
 
 ## License
 
-This project is under [CC-BY-NC-ND 4.0 International](http://creativecommons.org/licenses/by-nc-nd/4.0/) license.
+This project is under the [GNU GPL license](LICENSE.md) terms.
